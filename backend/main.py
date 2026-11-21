@@ -14,9 +14,11 @@ MAX_FILE_BYTES = 8 * 1024 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 origins_env = os.getenv("CORS_ORIGINS", "*")
-origins = ["*"] if origins_env.strip() == "*" else [x.strip() for x in origins_env.split(",") if x.strip()]
+origins = ["*"] if origins_env.strip() == "*" else [
+    origin.strip() for origin in origins_env.split(",") if origin.strip()
+]
 
-app = FastAPI(title=APP_NAME, version="1.1.0")
+app = FastAPI(title=APP_NAME, version="1.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -25,44 +27,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @lru_cache(maxsize=1)
 def get_ocr() -> PaddleOCR:
-    # PaddleOCR's Latin recognition model covers many Latin-script languages.
-    # Uzbek-specific letters and Cyrillic performance must be verified with real samples.
+    # The OCR model is initialized on the first OCR request.
+    # First use may take longer because PaddleOCR downloads its model files.
     return PaddleOCR(use_angle_cls=True, lang="latin", show_log=False)
+
 
 @app.get("/")
 def root():
-    return {"ok": True, "service": APP_NAME, "docs": "/docs"}
+    return {"ok": True, "service": APP_NAME, "health": "/health", "docs": "/docs"}
+
 
 @app.get("/health")
 def health():
+    # This checks the API process only; it intentionally does not load the large OCR model.
     return {"ok": True, "service": APP_NAME, "ocr_model": "PaddleOCR latin (lazy-loaded)"}
+
 
 @app.post("/api/ocr")
 async def read_text(file: UploadFile = File(...)):
     if file.content_type not in ALLOWED_TYPES:
-        return JSONResponse(status_code=415, content={
-            "ok": False, "text": "", "lines": [],
-            "message": "Faqat JPG, PNG yoki WEBP rasm yuboring."
-        })
+        return JSONResponse(
+            status_code=415,
+            content={
+                "ok": False,
+                "text": "",
+                "lines": [],
+                "message": "Faqat JPG, PNG yoki WEBP rasm yuboring.",
+            },
+        )
 
-    raw = await file.read()
+    raw = await file.read(MAX_FILE_BYTES + 1)
     if not raw:
-        return JSONResponse(status_code=400, content={
-            "ok": False, "text": "", "lines": [], "message": "Yuborilgan rasm bo‘sh."
-        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "text": "",
+                "lines": [],
+                "message": "Yuborilgan rasm bo‘sh.",
+            },
+        )
     if len(raw) > MAX_FILE_BYTES:
-        return JSONResponse(status_code=413, content={
-            "ok": False, "text": "", "lines": [], "message": "Rasm hajmi 8 MB dan oshmasligi kerak."
-        })
+        return JSONResponse(
+            status_code=413,
+            content={
+                "ok": False,
+                "text": "",
+                "lines": [],
+                "message": "Rasm hajmi 8 MB dan oshmasligi kerak.",
+            },
+        )
 
     image_array = np.frombuffer(raw, dtype=np.uint8)
     image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
     if image is None:
-        return JSONResponse(status_code=400, content={
-            "ok": False, "text": "", "lines": [], "message": "Rasm faylini o‘qib bo‘lmadi."
-        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "text": "",
+                "lines": [],
+                "message": "Rasm faylini o‘qib bo‘lmadi.",
+            },
+        )
 
     try:
         result: Any = get_ocr().ocr(image, cls=True)
@@ -74,14 +104,28 @@ async def read_text(file: UploadFile = File(...)):
                 recognized = str(item[1][0]).strip()
                 confidence = float(item[1][1])
                 if recognized:
-                    lines.append({"text": recognized, "confidence": round(confidence, 4)})
+                    lines.append(
+                        {"text": recognized, "confidence": round(confidence, 4)}
+                    )
 
-        text = "\n".join(line["text"] for line in lines)
-        return {"ok": True, "text": text, "lines": lines, "message": "Matn tahlili yakunlandi."}
+        extracted_text = "\n".join(line["text"] for line in lines)
+        return {
+            "ok": True,
+            "text": extracted_text,
+            "lines": lines,
+            "message": "Matn tahlili yakunlandi.",
+        }
     except Exception as exc:
-        # Avoid exposing internal server details to public clients.
-        print(f"OCR processing error: {type(exc).__name__}: {exc}")
-        return JSONResponse(status_code=500, content={
-            "ok": False, "text": "", "lines": [],
-            "message": "OCR modelida xatolik yuz berdi. Server loglarini tekshiring."
-        })
+        # Keep internal exception details in server logs, not in public responses.
+        print(f"OCR processing error: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "text": "",
+                "lines": [],
+                "message": "OCR modelida xatolik yuz berdi. Server loglarini tekshiring.",
+            },
+        )
+    finally:
+        await file.close()
