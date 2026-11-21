@@ -1,6 +1,6 @@
 {
-  "name": "koznuri-ai-sprint1",
-  "version": "1.0.0",
+  "name": "koznuri-ai-sprint2",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
