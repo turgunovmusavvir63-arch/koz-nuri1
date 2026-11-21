@@ -1,52 +1,40 @@
-# Ko‘zNuri AI — Render backend
+# Ko‘zNuri AI — FastAPI + PaddleOCR backend
 
-This backend is intended to run as a **Render Docker Web Service**. Do not deploy this
-PaddleOCR backend as a Vercel serverless function: its dependencies exceed Vercel's
-500 MB function bundle limit.
+IMPORTANT: The existing Render service shown in the previous deployment logs is a Node.js
+service. Its runtime cannot be made into Docker merely by changing Build/Start commands.
+Create a NEW Render Web Service and choose Docker.
 
-## Render setup
+## Render deployment (new service)
 
-1. Push the contents of this `backend` folder to GitHub.
-2. In Render, create **New → Web Service** and connect the `koz-nuril` repository.
-3. Set **Root Directory** to `backend`.
-4. Choose **Docker** as the runtime/environment.
-5. Create the service. Render will build `Dockerfile` and start FastAPI.
-6. After deployment, test `https://YOUR-RENDER-SERVICE.onrender.com/health`.
+1. Push this project to GitHub (the `backend` folder must be in the repository root).
+2. Render Dashboard → New → Web Service → connect this GitHub repository.
+3. Set Root Directory to `backend`.
+4. Select Docker as the runtime/environment (not Node).
+5. Dockerfile Path: `./Dockerfile`.
+6. Do not enter custom Build Command or Start Command. Let the Dockerfile handle both.
+7. Add environment variable:
+   CORS_ORIGINS = https://koz-nuri.vercel.app
+8. Deploy. Wait for the Docker image build and service startup to finish.
 
-Expected health response:
+Test:
+- https://YOUR-NEW-SERVICE.onrender.com/health
+- https://YOUR-NEW-SERVICE.onrender.com/docs
 
-```json
-{
-  "ok": true,
-  "service": "Ko‘zNuri AI OCR API",
-  "ocr_model": "PaddleOCR latin (lazy-loaded)"
-}
-```
+`/health` should return JSON with `ok: true`. `/docs` should show FastAPI Swagger UI.
 
-## Environment variables
+## Vercel frontend
 
-Set `CORS_ORIGINS` in Render to the exact frontend origin, for example:
+In Vercel → project → Settings → Environment Variables, set:
+NEXT_PUBLIC_API_URL = https://YOUR-NEW-SERVICE.onrender.com
 
-`https://koz-nuri.vercel.app`
-
-For a comma-separated allowlist, use:
-
-`https://koz-nuri.vercel.app,https://www.example.com`
-
-For a temporary demo only, leaving it unset allows `*`.
+Do not append `/health`, `/docs`, `/api/ocr`, or a trailing slash.
+Apply it to Production (and Preview if needed), then redeploy the frontend.
 
 ## API
+- GET `/` and `/health`
+- GET `/docs`
+- POST `/api/ocr`, multipart field `file`; JPEG/PNG/WEBP, maximum 8 MB.
 
-- `GET /health` — checks that the API process is running. It does not load OCR weights.
-- `POST /api/ocr` — multipart form upload with field name `file`; accepts JPEG, PNG, WEBP up to 8 MB.
-- `GET /docs` — interactive API documentation.
-
-The first OCR request may be slower because PaddleOCR downloads its model files on first use.
-The model uses PaddleOCR's Latin model; Uzbek special letters, Cyrillic, and handwriting need
-separate real-world accuracy testing.
-
-## Important
-
-- The Docker image is based on Python 3.10 to align with the pinned PaddlePaddle 2.6.2 package.
-- `runtime.txt`, `.python-version`, and `Procfile` are intentionally not used for this Docker deployment.
-- This package only replaces the backend folder. Keep your Next.js frontend project unchanged.
+The OCR model is PaddleOCR Latin and is initialized on the first OCR request. The first request
+can take longer while model files are downloaded. Uzbek apostrophe variants, Cyrillic,
+handwriting, and poor-quality images require separate accuracy testing.

@@ -6,7 +6,7 @@ type CameraState = "idle" | "starting" | "active" | "error";
 type OcrState = "idle" | "loading" | "done" | "error";
 type OcrResponse = { ok: boolean; text: string; lines: { text: string; confidence: number }[]; message?: string };
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 export default function CameraWorkspace() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -83,6 +83,11 @@ export default function CameraWorkspace() {
   async function analyzeText() {
     if (!capturedImage) {
       setOcrError("Avval kameradan rasm oling.");
+      return;
+    }
+    if (!API_URL) {
+      setOcrError("OCR server manzili sozlanmagan. Vercel'da NEXT_PUBLIC_API_URL qiymatini kiriting va qayta deploy qiling.");
+      setOcrState("error");
       return;
     }
     setOcrState("loading");
